@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+# Make sure the husky init script has adequate permissions (required for *nix), then run it
+husky_init="$(dirname -- "$0")/_/husky.sh"
+if [[ -e "${husky_init}" ]]
+then
+  if [[ ! -r "${husky_init}" || ! -x "${husky_init}" ]]
+  then
+    chmod ugo+rx "${husky_init}"
+  fi
+  . "${husky_init}"
+fi
+
+
+set +e
+
+
+# Used to replace/identify newlines, since extended greps don't seem to support newlines
+newline="$(printf "\035")"
+
+story_number_pattern="[A-Z]{2,}-[0-9]+"
+commit_title_max_length=70
+commit_title_pattern="[A-Z][^${newline}]+"
+commit_body_line_pattern="${newline}+.+"
+commit_allowed_pattern="^(${story_number_pattern}): (${commit_title_pattern})(${commit_body_line_pattern})*${newline}$"
+# Slightly adjusted from the allowed pattern with preceding optional groups to tell which pieces are missing
+commit_diagnostic_pattern="^(${story_number_pattern})(: ((${commit_title_pattern})(${commit_body_line_pattern})*)?)?.*${newline}$"
+
+
+# Load the commit message from the file, and replace newlines for our patterns
+commit="$(cat "$1" | tr "\n" "${newline}")"
+
+# User-specified commit messages often have a newline auto-appended, but system-generated ones (reverts, merges, squashes) don't.
+# Add a trailing newline if there isn't one, and make sure there's only one of them
+commit="$(echo -n "${commit}" | sed -E "s/${newline}*$/${newline}/")"
+
+# System-generated commits don't need to follow the format. Let them pass
+if [[ -n "$(echo -n "${commit}" | grep -E "^(Merge branch)|(Merge pull request)|(Revert)")" ]]
+then
+  # Save changes to the message back to the file
+  echo -n "${commit}" | tr "${newline}" "\n" > "$1"
+
+  exit 0
+fi
+
+story_number="$(echo -n "${commit}" | sed -En "s/${commit_diagnostic_pattern}/\1/p")"
+commit_title_with_separator="$(echo -n "${commit}" | sed -En "s/${commit_diagnostic_pattern}/\2/p")"
+commit_title="$(echo -n "${commit}" | sed -En "s/${commit_diagnostic_pattern}/\4/p")"
+commit_body="$(echo -n "${commit}" | sed -En "s/${commit_diagnostic_pattern}/\5/p")"
+
+# Debugging messages
+echo "story number: ~${story_number}~"
+echo "commit title: ~${commit_title}~"
+echo "commit title with separator: ~${commit_title_with_separator}~"
+echo "commit body: ~${commit_body}~"
+
+# Make sure the body (if there is one) is separated by two newlines
+if [[ -n "${commit_body}" ]] && \
+   [[ "$(echo -n "${commit_body}" | grep -Eo "^${newline}+" | tr -d "\n" | wc -m)" -ne 2 ]]
+then
+  echo "Formatting body"
+  commit="$(echo -n "${commit}" | sed -E "s/^([^${newline}]+)${newline}+(.+)/\1${newline}${newline}\2/")"
+  commit_body="$(echo -n "${commit}" | sed -En "s/${commit_diagnostic_pattern}/\4/p")"
+fi
+
+# Save changes to the message back to the file
+echo -n "${commit}" | tr "${newline}" "\n" > "$1"
+
+if [[ -z "$(echo -n "${commit}" | grep -E "${commit_allowed_pattern}")" ]] || \
+   [[ "$(echo -n "${commit_title}" | wc -m)" -gt ${commit_title_max_length} ]]
+then
+  # Commit message failed validation
+
+  # Encapsulate all of our output so we can send it to stderr in one go
+  {
+    echo "ERROR: Commit message does not match the required format:"
+    echo "-"
+    cat "$(dirname -- "$0")/../.gitmessage"
+    echo "-"
+    echo "Your commit message:"
+    cat "$1"
+    echo "${commit}"
+    echo "-"
+  } >&2
+
+  # Show a more granular reason why
+  if [[ -z "${story_number}" ]]
+  then
+    echo "Story number missing or malformed"
+  elif [[ -z "${commit_title_with_separator}" ]]
+  then
+    echo "Title separator missing or malformed. A colon and space between your story number and title are required"
+  elif [[ -z "${commit_title}" ]]
+  then
+    echo "Title missing or malformed"
+  elif [[ "$(echo -n "${commit_title}" | wc -m)" -gt ${commit_title_max_length} ]]
+  then
+    echo "Title longer than max length of ${commit_title_max_length}"
+    echo "Title ($(echo -n "${commit_title}" | wc -m) chars): ${commit_title}"
+  else
+    echo "Body malformed or other general formatting error"
+  fi
+
+  exit 1
+fi
+
+exit 0

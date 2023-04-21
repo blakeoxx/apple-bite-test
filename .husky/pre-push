@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+# Make sure the husky init script has adequate permissions (required for *nix), then run it
+husky_init="$(dirname -- "$0")/_/husky.sh"
+if [[ -e "${husky_init}" ]]
+then
+  if [[ ! -r "${husky_init}" || ! -x "${husky_init}" ]]
+  then
+    chmod ugo+rx "${husky_init}"
+  fi
+  . "${husky_init}"
+fi
+
+
+set +e
+
+
+# Used to identify pushes from/to empty objects
+zero_sha=0000000000000000000000000000000000000000
+
+story_number_pattern="[a-z]{2,}-[0-9]+"
+
+# The type of branch names we allow
+feature_branch_pattern="${story_number_pattern}-[a-z0-9-]+"
+feature_branch_explanation="board-1234-short-feature-description (usually the shortened story name from Jira)"
+release_branch_pattern="[a-z0-9-]+-integration"
+release_branch_explanation="release-name-integration (ends with -integration)"
+reserved_branches_pattern="master"
+reserved_branches_explanation="${reserved_branches_pattern} (special branches you probably don't want to push to anyway)"
+
+# Put all the allowed branch names together
+branches_allowed_pattern="^(${feature_branch_pattern})|(${release_branch_pattern})|(${reserved_branches_pattern})$"
+branch_max_length=40
+
+
+# Git passes the local and remote ref and sha on stdin for each remote being pushed to.
+# Loop through them and validate the branch name, if the branch is being pushed to
+while read local_ref local_sha remote_ref remote_sha
+do
+  if [ "$local_sha" = $zero_sha ]
+  then
+    # Branch is being deleted
+    :
+  else
+    # Branch is being created or updated
+
+    # Pull the branch name from the ref
+    branch_name=`echo -n "$remote_ref" | sed -nE "s/^refs\/heads\/(.+)$/\1/p"`
+
+    if [[ -z $branch_name ]]
+    then
+      # No branch name. Probably pushing to a tag or other symbolic ref
+      :
+    elif [[ "$(echo -n "$branch_name" | wc -m)" -gt $branch_max_length ]] || \
+         [[ "$(echo -n "$branch_name" | grep -E "$branches_allowed_pattern")" = "" ]]
+    then
+      # Branch name failed validation
+
+      # Encapsulate all of our output so we can send it to stderr in one go
+      {
+        echo "ERROR: Branch name does not match the required format:"
+        echo "-"
+        echo "# All branch names must be lowercase, and a maximum of ${branch_max_length} characters."
+        echo "# - Feature branches: ${feature_branch_explanation}"
+        echo "# - Release branches: ${release_branch_explanation}"
+        echo "# - Reserved branches: ${reserved_branches_explanation}"
+        echo "-"
+        echo "Your branch name:"
+        echo "$branch_name"
+        echo "-"
+      } >&2
+      exit 1
+    fi
+  fi
+done
+
+exit 0
