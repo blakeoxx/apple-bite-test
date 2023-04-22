@@ -11,6 +11,7 @@ if [ -z "$husky_skip_init" ]; then
 
   if [ "$HUSKY" = "0" ]; then
     debug "HUSKY env variable is set to 0, skipping hook"
+	echo "husky exit 1" >> "$(dirname -- "$0")/runlog.txt"
     exit 0
   fi
 
@@ -21,6 +22,7 @@ if [ -z "$husky_skip_init" ]; then
 
   readonly husky_skip_init=1
   export husky_skip_init
+  echo "husky recalling script" >> "$(dirname -- "$0")/runlog.txt"
   sh -e "$0" "$@"
   exitCode="$?"
 
@@ -32,5 +34,8 @@ if [ -z "$husky_skip_init" ]; then
     echo "husky - command not found in PATH=$PATH"
   fi
 
+  echo "husky exit 2" >> "$(dirname -- "$0")/runlog.txt"
   exit $exitCode
 fi
+
+echo "husky outer loop" >> "$(dirname -- "$0")/runlog.txt"

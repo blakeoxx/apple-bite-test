@@ -11,6 +11,14 @@ then
   . "${husky_init}"
 fi
 
+# Husky init recalls this script in sh, but we want bash features. Ensure we're in bash
+if [[ ! "${BASH_VERSION}" ]]
+then
+  bash "$0" "$@"
+  exitCode="$?"
+  exit $exitCode
+fi
+
 
 set +e
 
